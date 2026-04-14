@@ -28,6 +28,3 @@ desktop.ini
 
 # mrar test data (do not commit real bill images)
 tests/receipts/
-
-# Output manifests from local runs
-manifest.json" | save .gitignore
