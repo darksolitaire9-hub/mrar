@@ -1,0 +1,33 @@
+# Create the .gitignore from Nushell
+"# Cargo build artifacts
+target/
+debug/
+
+# Rust formatter backups
+**/*.rs.bk
+
+# Windows MSVC debug symbols
+*.pdb
+
+# Cargo mutation testing output
+**/mutants.out*/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Environment / secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# mrar test data (do not commit real bill images)
+tests/receipts/
+
+# Output manifests from local runs
+manifest.json" | save .gitignore
