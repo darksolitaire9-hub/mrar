@@ -1,3 +1,5 @@
+// benches/pipeline.rs
+
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use mrar::pipeline::metadata::strip_all;
 use std::fs;
