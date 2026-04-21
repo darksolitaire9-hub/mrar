@@ -27,4 +27,11 @@ Thumbs.db
 desktop.ini
 
 # mrar test data (do not commit real bill images)
+
 tests/receipts/
+tests/fixtures/*.jpg
+tests/fixtures/*.jpeg
+tests/fixtures/*.png
+tests/fixtures/*.tiff
+tests/fixtures/*.tif
+tests/fixtures/*.webp

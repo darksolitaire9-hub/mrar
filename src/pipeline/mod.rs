@@ -1,4 +1,5 @@
 // src/pipeline/mod.rs
+pub mod compress;
 pub mod metadata;
 pub mod process;
 pub mod rename;
