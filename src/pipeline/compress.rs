@@ -1,12 +1,15 @@
 use anyhow::Context;
-use image::{ImageFormat, imageops::FilterType};
+use fast_image_resize::images::Image;
+use fast_image_resize::{PixelType, Resizer};
+use image::{ColorType, DynamicImage, ImageFormat};
 use std::io::Cursor;
 
 /// Pure: compress image bytes.
-/// - If image already fits within max_dim: re-encodes at `quality` only (no resize).
-/// - If image exceeds max_dim: resize with Lanczos3, then re-encode.
-/// - PNG/TIFF/WebP: lossless re-encode (quality param ignored for non-JPEG).
-/// Returns new bytes, or original bytes if already optimal.
+/// - Decodes with `image` crate
+/// - Resizes with `fast_image_resize` (SIMD AVX2/SSE4.1 auto-detected)
+/// - Re-encodes to original format
+/// Images already within max_dim are re-encoded only (no resize).
+/// max_dim = None skips resize entirely.
 pub fn compress(
     buf: &[u8],
     max_dim: Option<u32>,
@@ -18,7 +21,7 @@ pub fn compress(
 
     let resized = match max_dim {
         Some(dim) if img.width() > dim || img.height() > dim => {
-            img.resize(dim, dim, FilterType::Lanczos3)
+            resize_fast(img, dim).context("compress: resize failed")?
         }
         _ => img,
     };
@@ -26,14 +29,49 @@ pub fn compress(
     encode(resized, fmt, quality)
 }
 
-/// Pure: encode a DynamicImage into bytes for the given format.
-fn encode(img: image::DynamicImage, fmt: ImageFormat, quality: u8) -> anyhow::Result<Vec<u8>> {
-    let mut out: Vec<u8> = Vec::new();
+/// Pure: SIMD-accelerated resize using fast_image_resize.
+/// Preserves aspect ratio. Uses Lanczos3 filter.
+fn resize_fast(img: DynamicImage, max_dim: u32) -> anyhow::Result<DynamicImage> {
+    let (orig_w, orig_h) = (img.width(), img.height());
 
+    let (target_w, target_h) = if orig_w >= orig_h {
+        let h = (orig_h as f64 * max_dim as f64 / orig_w as f64).round() as u32;
+        (max_dim, h.max(1))
+    } else {
+        let w = (orig_w as f64 * max_dim as f64 / orig_h as f64).round() as u32;
+        (w.max(1), max_dim)
+    };
+
+    let rgba = img.to_rgba8();
+    let src = Image::from_vec_u8(orig_w, orig_h, rgba.into_raw(), PixelType::U8x4)
+        .context("compress: failed to create src image")?;
+
+    let mut dst = Image::new(target_w, target_h, PixelType::U8x4);
+
+    Resizer::new()
+        .resize(&src, &mut dst, None)
+        .context("compress: fast_image_resize failed")?;
+
+    let out = image::RgbaImage::from_raw(target_w, target_h, dst.into_vec())
+        .context("compress: failed to reconstruct image")?;
+
+    Ok(DynamicImage::ImageRgba8(out))
+}
+
+/// Pure: encode DynamicImage to bytes for the given format.
+fn encode(img: DynamicImage, fmt: ImageFormat, quality: u8) -> anyhow::Result<Vec<u8>> {
+    let mut out: Vec<u8> = Vec::new();
     match fmt {
         ImageFormat::Jpeg => {
+            // JPEG does not support alpha — convert to Rgb8 first
+            let rgb = img.to_rgb8();
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
-                .encode_image(&img)
+                .encode(
+                    rgb.as_raw(),
+                    rgb.width(),
+                    rgb.height(),
+                    ColorType::Rgb8.into(),
+                )
                 .context("compress: JPEG encode failed")?;
         }
         _ => {
@@ -41,7 +79,6 @@ fn encode(img: image::DynamicImage, fmt: ImageFormat, quality: u8) -> anyhow::Re
                 .context("compress: encode failed")?;
         }
     }
-
     Ok(out)
 }
 
@@ -91,5 +128,14 @@ mod tests {
         let buf = make_png(200, 200);
         let out = compress(&buf, None, 90, "png").unwrap();
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn aspect_ratio_preserved() {
+        let buf = make_png(3000, 1500); // 2:1 landscape
+        let out = compress(&buf, Some(1920), 90, "png").unwrap();
+        let decoded = image::load_from_memory(&out).unwrap();
+        assert_eq!(decoded.width(), 1920);
+        assert_eq!(decoded.height(), 960);
     }
 }
