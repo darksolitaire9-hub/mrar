@@ -2,7 +2,7 @@
 name = "mrar"
 version = "0.1.0"
 edition = "2024"
-license = "MIT" 
+license = "MIT"
 
 [dependencies]
 anyhow = "1.0.102"
@@ -24,6 +24,8 @@ walkdir = "2.5.0"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 loom = "0.7.2"
+tempfile = "3"
+
 
 [[bench]]
 name = "pipeline"

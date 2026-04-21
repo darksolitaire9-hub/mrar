@@ -8,22 +8,97 @@ mod scan;
 
 use anyhow::Context;
 use clap::Parser;
+use dialoguer::{Confirm, Select};
+use std::process::Command;
 
 use crate::error::MrarError;
 use cli::{CliArgs, Config};
+use interactive::InteractiveMode;
 use manifest::{build_manifest, write_manifest};
 use pipeline::{plan_work, run_pipeline};
 
 fn main() -> anyhow::Result<()> {
     // ── Impure: parse CLI ─────────────────────────────
     let args = CliArgs::parse();
-    let config: Config = if args.input.is_none() {
-        interactive::prompt_config()?
-    } else {
-        Config::resolve(args)
-    };
 
-    // ── Impure: discover files ────────────────────────────
+    // Non-interactive CLI: run once and exit
+    if args.input.is_some() {
+        let config = Config::resolve(args);
+        run_once(&config)?;
+
+        println!(
+            "✅ Done. Processed images are in: {}",
+            config.output_dir.display()
+        );
+
+        return Ok(());
+    }
+
+    // Interactive mode: loop with explicit menu
+    loop {
+        let (config, mode) = interactive::prompt_config()?;
+
+        run_once(&config)?;
+
+        // Post-run UX: success + optional open folder
+        match mode {
+            InteractiveMode::Gui => {
+                println!(
+                    "✅ Done. Processed images are in: {}",
+                    config.output_dir.display()
+                );
+
+                let open = Confirm::new()
+                    .with_prompt("Open this folder in Explorer/Finder?")
+                    .default(true)
+                    .interact()?;
+
+                if open {
+                    open_folder_in_file_manager(&config.output_dir)?;
+                }
+            }
+            InteractiveMode::Cli => {
+                println!(
+                    "✅ Done. Processed images are in: {}",
+                    config.output_dir.display()
+                );
+            }
+        }
+
+        // Next-action menu
+        let options = &[
+            "Process another folder",
+            "Re-run with the same settings",
+            "Exit",
+        ];
+
+        let choice = Select::new()
+            .with_prompt("What would you like to do next?")
+            .items(options)
+            .default(2) // default to "Exit"
+            .interact()?;
+
+        match choice {
+            0 => {
+                println!();
+                continue;
+            }
+            1 => {
+                println!();
+                run_once(&config)?;
+            }
+            2 | _ => {
+                break;
+            }
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
+fn run_once(config: &Config) -> anyhow::Result<()> {
     let paths = scan::discover_images(&config.input_dir).with_context(|| {
         format!(
             "Could not scan '{}' — check the path exists and you have read access",
@@ -45,17 +120,13 @@ fn main() -> anyhow::Result<()> {
         println!("[dry-run] no files will be written");
     }
 
-    // ── Pure: plan work items ─────────────────────────────
-    let work_items = plan_work(paths, &config);
+    let work_items = plan_work(paths, config);
 
-    // ── Impure: run parallel pipeline ─────────────────────
-    let results = run_pipeline(&config, work_items)
+    let results = run_pipeline(config, work_items)
         .context("Pipeline failed — check the output folder has write access")?;
 
-    // ── Pure: build manifest ──────────────────────────────
     let manifest = build_manifest(&results, config.dry_run);
 
-    // ── Impure: write manifest ────────────────────────────
     if !config.dry_run {
         write_manifest(&config.output_dir, &manifest).with_context(|| {
             format!(
@@ -65,7 +136,6 @@ fn main() -> anyhow::Result<()> {
         })?;
     }
 
-    // ── Print summary ─────────────────────────────────────
     let processed = results.iter().filter(|r| !r.skipped).count();
     let saved_kb = manifest.total_bytes_saved / 1024;
     println!(
@@ -76,4 +146,33 @@ fn main() -> anyhow::Result<()> {
     );
 
     Ok(())
+}
+
+fn open_folder_in_file_manager(path: &std::path::Path) -> anyhow::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("failed to open Explorer: {e}"))
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("failed to open Finder: {e}"))
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("failed to open file manager: {e}"))
+    }
 }

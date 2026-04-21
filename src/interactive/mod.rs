@@ -5,12 +5,18 @@ mod compression;
 mod dry_run;
 mod folders;
 
-pub fn prompt_config() -> anyhow::Result<Config> {
+#[derive(Debug, Clone, Copy)]
+pub enum InteractiveMode {
+    Gui,
+    Cli,
+}
+
+pub fn prompt_config() -> anyhow::Result<(Config, InteractiveMode)> {
     let theme = ColorfulTheme::default();
 
     println!("\n  mrar — interactive mode\n");
 
-    let mode = Select::with_theme(&theme)
+    let mode_idx = Select::with_theme(&theme)
         .with_prompt("How do you want to select your image folder?")
         .items(&[
             "Browse for a folder  – opens a dialog to click and select  (recommended)",
@@ -19,15 +25,15 @@ pub fn prompt_config() -> anyhow::Result<Config> {
         .default(0)
         .interact()?;
 
-    let config = match mode {
-        0 => prompt_config_gui(&theme)?,
-        1 => prompt_config_cli(&theme)?,
-        _ => prompt_config_gui(&theme)?,
+    let (config, mode) = match mode_idx {
+        0 => (prompt_config_gui(&theme)?, InteractiveMode::Gui),
+        1 => (prompt_config_cli(&theme)?, InteractiveMode::Cli),
+        _ => (prompt_config_gui(&theme)?, InteractiveMode::Gui),
     };
 
     println!();
 
-    Ok(config)
+    Ok((config, mode))
 }
 
 fn prompt_config_gui(theme: &ColorfulTheme) -> anyhow::Result<Config> {
